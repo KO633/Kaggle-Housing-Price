@@ -1,0 +1,324 @@
+---
+title: "MachineProj_BoostingVersion"
+output: html_notebook
+---
+
+
+#Importing data and libraries
+```{r}
+library(randomForest)
+library(dplyr)
+houses.test = read.csv("C:\\Storage\\Notes\\Datasets\\house-prices-advanced-regression-techniques\\test.csv", stringsAsFactors = FALSE) %>% mutate(is.train=0)
+houses.train = read.csv("C:\\Storage\\Notes\\Datasets\\house-prices-advanced-regression-techniques\\train.csv", stringsAsFactors = FALSE) %>% mutate(is.train=1)
+
+```
+
+
+#Removing Respose vector and combining sets for feature engineering
+```{r}
+SP<-houses.train$SalePrice
+houses.train$SalePrice<-NULL
+Houses.Full<-rbind(houses.train, houses.test)
+```
+
+```{r}
+
+```
+
+
+#seed here while I'm making sure this code works for reproducing results will remove later
+
+```{r}
+set.seed(143)
+
+```
+
+
+# Many NA values that are actually levels
+#For garage variables na in finish indicates no garage so no values expected for the other garage variables either
+#For columns with na's that total less than 2% of the data(which is pretty much all of them) median and mean values were used instead
+```{r}
+Houses.Full$Alley[is.na(Houses.Full$Alley)] <- "invalid"
+Houses.Full$BsmtQual[is.na(Houses.Full$BsmtQual)] <- "invalid"
+Houses.Full$BsmtCond[is.na(Houses.Full$BsmtCond)] <- "invalid"
+Houses.Full$BsmtExposure[is.na(Houses.Full$BsmtExposure)] <- "invalid"
+Houses.Full$BsmtFinType1[is.na(Houses.Full$BsmtFinType1)] <- "invalid"
+Houses.Full$BsmtFinType2[is.na(Houses.Full$BsmtFinType2)] <- "invalid"
+Houses.Full$FireplaceQu[is.na(Houses.Full$FireplaceQu)] <- "invalid"
+Houses.Full$GarageType[is.na(Houses.Full$GarageFinish)] <- "invalid"
+Houses.Full$GarageYrBlt[is.na(Houses.Full$GarageFinish)] <- "invalid"
+Houses.Full$GarageFinish[is.na(Houses.Full$GarageFinish)] <- "invalid"
+Houses.Full$GarageCond[is.na(Houses.Full$GarageCond)] <- "invalid"
+Houses.Full$GarageQual[is.na(Houses.Full$GarageQual)]<-"invalid"
+Houses.Full$PoolQC[is.na(Houses.Full$PoolQC)] <- "invalid"
+Houses.Full$Fence[is.na(Houses.Full$Fence)] <- "invalid"
+Houses.Full$MiscFeature[is.na(Houses.Full$MiscFeature)] <- "invalid"
+Houses.Full$MSZoning[is.na(Houses.Full$MSZoning)] <- "RL"
+Houses.Full$Utilities[is.na(Houses.Full$Utilities)] <- "AllPub"
+Houses.Full$Exterior1st[is.na(Houses.Full$Exterior1st)] <- "VinylSd"
+Houses.Full$Exterior2nd[is.na(Houses.Full$Exterior2nd)] <- "VinylSd"
+Houses.Full$MasVnrType[is.na(Houses.Full$MasVnrType)] <- "None"
+Houses.Full$MasVnrArea[is.na(Houses.Full$MasVnrArea)] <- 0.0
+Houses.Full$BsmtFinSF1 <- na.roughfix(Houses.Full$BsmtFinSF1)
+Houses.Full$BsmtFinSF2 <- na.roughfix(Houses.Full$BsmtFinSF2)
+Houses.Full$BsmtUnfSF <- na.roughfix(Houses.Full$BsmtUnfSF)
+Houses.Full$TotalBsmtSF <- na.roughfix(Houses.Full$TotalBsmtSF)
+Houses.Full$Electrical[is.na(Houses.Full$Electrical)]<-"SBrkr"
+Houses.Full$BsmtFullBath[is.na(Houses.Full$BsmtFullBath)] <- 0.0
+Houses.Full$BsmtHalfBath[is.na(Houses.Full$BsmtHalfBath)] <- 0.0
+Houses.Full$KitchenQual[is.na(Houses.Full$KitchenQual)] <- "TA"
+Houses.Full$Functional[is.na(Houses.Full$Functional)] <- "Typ"
+Houses.Full$GarageCars[is.na(Houses.Full$GarageCars)] <- 2.0
+Houses.Full$GarageArea <- na.roughfix(Houses.Full$GarageArea)
+Houses.Full$SaleType[is.na(Houses.Full$SaleType)] <- "WD"
+```
+
+
+```{r}
+colSums(is.na(Houses.Full))
+```
+
+
+```{r}
+summary(Houses.Full$GarageArea)
+```
+
+```{r}
+table(Houses.Full$GarageYrBlt)
+```
+
+#Variables for imputation: MSzoning, LotFrontage, Utilities, Exterior1st, Exterior2nd, MasVnrType
+#If MasVnrArea is na if MasVnrType is none the 0 otherwise impute
+
+
+#Imputation of all remaining missing variables, honestly only a few rows missing at this point for all for all of these variables so it seems like it would hardly matter
+
+#Converting all variables back to factors in the hope that it fixes mice
+```{r}
+Houses.Full[sapply(Houses.Full, is.character)] <- lapply(Houses.Full[sapply(Houses.Full, is.character)], 
+                                                          as.factor)
+```
+
+
+#Imputation of missing values
+```{r}
+library(mice)
+```
+
+
+```{r}
+HouseImp<-mice(Houses.Full)
+
+```
+
+```{r}
+HouseImp$imp$LotFrontage
+```
+
+
+#Taking the 1st set of imputed values and using it to complete the dataset(investige pooling later)
+```{r}
+FullHouse.imp<-complete(HouseImp,1)
+```
+
+```{r}
+train.num<-select_if(FullHouse.imp, is.numeric)
+```
+
+
+
+
+```{r}
+library(corrplot)
+```
+
+```{r}
+CorrInp<-cor(train.num)
+CorrPV<-cor.mtest(train.num)
+corrplot(CorrInp, type="upper", tl.cex = 0.5)
+cor.test(train.num$TotalBsmtSF, train.num$X1stFlrSF)
+```
+
+```{r}
+cor.test(train.num$GrLivArea, train.num$TotRmsAbvGrd)
+```
+
+
+
+#Investigating Normality and skew of variables
+#First up response
+```{r}
+qqnorm(SP, pch = 1, frame = FALSE, main = "QQ plot of SalePrice")
+qqline(SP, col = "steelblue", lwd = 2)
+```
+#Next up most influential numerical predictors
+```{r}
+qqnorm(Houses.Full$GrLivArea, pch = 1, frame = FALSE, main = "QQ plot of GRLivArea")
+qqline(Houses.Full$GrLivArea, col = "steelblue", lwd = 2)
+```
+
+```{r}
+qqnorm(Houses.Full$X1stFlrSF, pch = 1, frame = FALSE, main = "QQ plot of X1stFlrSF")
+qqline(Houses.Full$X1stFlrSF, col = "steelblue", lwd = 2)
+```
+#Checking a histogram of response
+```{r}
+hist(SP)
+```
+```{r}
+hist(Houses.Full$GrLivArea)
+```
+
+#Normalizing all numeric predictors, basic log transformation 
+```{r}
+colClass <- sapply(FullHouse.imp, class)
+logtransform <- function(x){
+    x <- log(1+x)
+  
+  x
+}
+
+numericCols <- setdiff(names(colClass[colClass == "integer" | colClass == "num"]),c("Id","is.train"))
+
+
+FullHouse.imp <- FullHouse.imp %>% mutate_at(.vars=colnames(FullHouse.imp)[colClass == "integer" | colClass == "num"], funs(logtransform))
+```
+
+```{r}
+qqnorm(FullHouse.imp$GrLivArea, pch = 1, frame = FALSE, main = "QQ plot of GRLivArea")
+qqline(FullHouse.imp$GrLivArea, col = "steelblue", lwd = 2)
+```
+```{r}
+hist(FullHouse.imp$GrLivArea)
+```
+#Log transformation of response, doesn't really matter for random forest but I want to be able to use this code fo other models sooo
+```{r}
+LogSP<-log(SP)
+```
+
+```{r}
+hist(LogSP)
+```
+```{r}
+qqnorm(LogSP, pch = 1, frame = FALSE, main = "QQ plot of Log (SalePrice)")
+qqline(LogSP, col = "steelblue", lwd = 2)
+```
+
+
+
+#Splitting back into training and test set
+```{r}
+train <- filter(FullHouse.imp, is.train == 1) %>% select(-is.train)
+test <- filter(FullHouse.imp, is.train == 0) %>% select(-is.train)
+```
+
+
+
+
+#Adding saleprice
+```{r}
+train2<-cbind(train, LogSP)
+```
+
+
+```{r}
+colSums(is.na(train2))
+```
+
+
+```{r}
+FinalTrain<-rename(train2, SalePrice=LogSP)
+```
+
+
+```{r}
+str(FinalTrain)
+```
+Cross Validation and tuning of boosting model
+```{r}
+library(caret)
+library(gbm)
+library(hydroGOF)
+library(Metrics)
+
+# Using caret with the default grid to optimize tune parameters automatically
+# GBM Tuning parameters:
+# n.trees (# Boosting Iterations)
+# interaction.depth (Max Tree Depth)
+# shrinkage (Shrinkage)
+# n.minobsinnode (Min. Terminal Node Size)
+
+metric <- "RMSE"
+trainControl <- trainControl(method="cv", number=7)
+
+gbm.caret <- train(SalePrice~.-Id-GarageYrBlt
+                   , data=FinalTrain
+                   , distribution="gaussian"
+                   , method="gbm"
+                   , trControl=trainControl
+                   , verbose=FALSE
+                   #, tuneGrid=caretGrid
+                   , metric=metric
+                   , bag.fraction=0.75
+                   )                
+```
+
+```{r}
+
+print(gbm.caret)
+```
+
+```{r}
+plot(gbm.caret)
+```
+
+
+```{r}
+boost.housing <- gbm(SalePrice~.-Id-GarageYrBlt-PoolQC-PoolArea-GarageQual-PavedDrive-MasVnrType-Alley-LotShape, data=FinalTrain, distribution="gaussian", n.trees=150, shrinkage = 0.1, interaction.depth = 3)
+
+```
+
+```{r}
+summary(boost.housing)
+```
+
+```{r}
+pred.boost<- predict(boost.housing, test)
+```
+
+```{r}
+summary(pred.boost)
+```
+#Output boosting version
+
+#Undoing log transformation of saleprice
+```{r}
+ClosingSale<-exp(pred.boost)
+```
+
+
+```{r}
+houses.solution2 = data.frame( houses.test$Id, ClosingSale)
+
+```
+
+
+```{r}
+write.csv(file = "C:/Storage/Notes/Machine/HousingSolutions2.csv", houses.solution2, row.names = FALSE)
+```
+
+
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+```{r}
+plot(cars)
+```
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
